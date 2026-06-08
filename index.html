@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Caméra vocale</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --red: #ff2d2d; --green: #00ff88; --blue: #00c8ff;
+    --dark: #080c10; --dark2: #0d1318; --panel: #111820;
+    --border: #1e2d3a; --text: #c8dce8; --dim: #3a5060;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--dark); color:var(--text); font-family:'Space Mono',monospace; min-height:100vh; display:flex; flex-direction:column; align-items:center; overflow-x:hidden; }
+
+  header { width:100%; padding:14px 24px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid var(--border); background:var(--dark2); }
+  .logo { font-family:'Orbitron',monospace; font-weight:900; font-size:1.3rem; letter-spacing:4px; color:var(--blue); text-shadow:0 0 20px rgba(0,200,255,0.5); }
+  .logo span { color:var(--red); }
+  .status-bar { display:flex; gap:16px; align-items:center; font-size:0.65rem; letter-spacing:1px; color:var(--dim); }
+  .status-dot { width:7px; height:7px; border-radius:50%; background:var(--dim); display:inline-block; }
+  .status-dot.active { background:var(--green); box-shadow:0 0 8px var(--green); animation:pulse 1.5s infinite; }
+  .status-dot.recording { background:var(--red); box-shadow:0 0 8px var(--red); animation:pulse 0.8s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1}50%{opacity:0.3} }
+
+  .main { width:100%; max-width:900px; padding:20px 16px; display:flex; flex-direction:column; gap:16px; }
+
+  .viewfinder-wrap { position:relative; width:100%; aspect-ratio:16/9; background:#000; border:1px solid var(--border); overflow:hidden; border-radius:4px; }
+  #videoEl { width:100%; height:100%; object-fit:cover; display:block; transform-origin:center center; transition:transform 0.4s cubic-bezier(0.25,0.46,0.45,0.94); }
+
+  .hud { position:absolute; inset:0; pointer-events:none; }
+  .corner { position:absolute; width:28px; height:28px; border-color:var(--blue); border-style:solid; opacity:0.7; }
+  .corner.tl { top:12px; left:12px; border-width:2px 0 0 2px; }
+  .corner.tr { top:12px; right:12px; border-width:2px 2px 0 0; }
+  .corner.bl { bottom:12px; left:12px; border-width:0 0 2px 2px; }
+  .corner.br { bottom:12px; right:12px; border-width:0 2px 2px 0; }
+  .crosshair { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:40px; height:40px; opacity:0.35; }
+  .crosshair::before,.crosshair::after { content:''; position:absolute; background:var(--blue); }
+  .crosshair::before { width:1px; height:100%; left:50%; transform:translateX(-50%); }
+  .crosshair::after { width:100%; height:1px; top:50%; transform:translateY(-50%); }
+  .rec-badge { position:absolute; top:14px; left:50%; transform:translateX(-50%); background:var(--red); color:#fff; font-family:'Orbitron',monospace; font-size:0.6rem; font-weight:700; letter-spacing:3px; padding:3px 10px; border-radius:2px; display:none; }
+  .rec-badge.show { display:block; animation:pulse 0.8s infinite; }
+  .zoom-hud { position:absolute; bottom:14px; right:14px; font-family:'Orbitron',monospace; font-size:0.75rem; font-weight:700; color:var(--blue); text-shadow:0 0 10px rgba(0,200,255,0.6); letter-spacing:2px; }
+  .rec-timer { position:absolute; bottom:14px; left:14px; font-family:'Orbitron',monospace; font-size:0.75rem; color:var(--red); display:none; letter-spacing:2px; }
+  .rec-timer.show { display:block; }
+  .scanlines { position:absolute; inset:0; background:repeating-linear-gradient(to bottom,transparent 0px,transparent 2px,rgba(0,0,0,0.08) 2px,rgba(0,0,0,0.08) 4px); pointer-events:none; }
+  .no-cam { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; background:var(--dark2); }
+  .no-cam-icon { font-size:3rem; opacity:0.3; }
+  .no-cam-text { font-size:0.75rem; color:var(--dim); letter-spacing:2px; text-align:center; line-height:1.8; }
+  .cmd-flash { position:absolute; inset:0; background:rgba(0,255,136,0.15); pointer-events:none; opacity:0; transition:opacity 0.1s; border-radius:4px; }
+  .cmd-flash.show { opacity:1; }
+
+  .controls { display:grid; grid-template-columns:1fr auto 1fr; align-items:center; gap:16px; }
+  .zoom-strip { display:flex; align-items:center; gap:8px; }
+  .zoom-btn { width:38px; height:38px; border-radius:50%; border:1px solid var(--border); background:var(--panel); color:var(--blue); font-size:1.1rem; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:all 0.15s; }
+  .zoom-btn:hover { border-color:var(--blue); background:rgba(0,200,255,0.08); }
+  .zoom-btn:active { transform:scale(0.9); }
+  .zoom-track { flex:1; height:4px; background:var(--border); border-radius:2px; position:relative; }
+  .zoom-fill { height:100%; background:linear-gradient(90deg,var(--blue),var(--green)); border-radius:2px; transition:width 0.4s; }
+  .rec-btn { width:64px; height:64px; border-radius:50%; border:3px solid var(--red); background:transparent; cursor:pointer; position:relative; transition:all 0.2s; display:flex; align-items:center; justify-content:center; }
+  .rec-btn::before { content:''; width:44px; height:44px; border-radius:50%; background:var(--red); transition:all 0.2s; }
+  .rec-btn.recording::before { border-radius:6px; width:28px; height:28px; }
+  .rec-btn:hover { box-shadow:0 0 20px rgba(255,45,45,0.4); }
+  .mic-btn { width:46px; height:46px; border-radius:50%; border:2px solid var(--border); background:var(--dark2); color:var(--dim); font-size:1.2rem; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:all 0.2s; flex-shrink:0; user-select:none; -webkit-user-select:none; }
+  .mic-btn.listening { border-color:var(--green); color:var(--green); background:rgba(0,255,136,0.08); box-shadow:0 0 16px rgba(0,255,136,0.3); animation:mic-pulse 1s infinite; }
+  @keyframes mic-pulse { 0%,100%{box-shadow:0 0 16px rgba(0,255,136,0.3)}50%{box-shadow:0 0 28px rgba(0,255,136,0.6)} }
+
+  .voice-panel { background:var(--panel); border:1px solid var(--border); border-radius:4px; padding:14px 18px; display:flex; align-items:center; gap:16px; }
+  .voice-info { flex:1; min-width:0; }
+  .voice-label { font-size:0.6rem; letter-spacing:2px; color:var(--dim); text-transform:uppercase; margin-bottom:4px; }
+  .voice-text { font-size:0.8rem; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-height:1.2em; }
+  .voice-text.cmd { color:var(--green); }
+
+  .cmds-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:8px; }
+  .cmd-card { background:var(--panel); border:1px solid var(--border); border-radius:4px; padding:10px 12px; display:flex; flex-direction:column; gap:4px; }
+  .cmd-word { font-family:'Orbitron',monospace; font-size:0.65rem; color:var(--blue); letter-spacing:1px; }
+  .cmd-desc { font-size:0.6rem; color:var(--dim); letter-spacing:0.5px; }
+  .section-label { font-size:0.6rem; letter-spacing:3px; color:var(--dim); text-transform:uppercase; padding-bottom:6px; border-bottom:1px solid var(--border); }
+
+  #startScreen { position:fixed; inset:0; background:var(--dark); z-index:100; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:24px; padding:24px; }
+  .start-logo { font-family:'Orbitron',monospace; font-weight:900; font-size:2.5rem; letter-spacing:8px; color:var(--blue); text-shadow:0 0 40px rgba(0,200,255,0.5); text-align:center; }
+  .start-logo span { color:var(--red); }
+  .start-sub { font-size:0.7rem; letter-spacing:3px; color:var(--dim); text-align:center; }
+  .start-btn { background:transparent; border:2px solid var(--blue); color:var(--blue); font-family:'Orbitron',monospace; font-size:0.75rem; letter-spacing:3px; padding:14px 36px; cursor:pointer; transition:all 0.2s; border-radius:2px; }
+  .start-btn:hover { background:var(--blue); color:var(--dark); box-shadow:0 0 30px rgba(0,200,255,0.4); }
+  .start-perms { font-size:0.6rem; color:var(--dim); letter-spacing:1px; text-align:center; max-width:300px; line-height:1.8; }
+
+  @media(max-width:500px) {
+    .start-logo{font-size:1.6rem;letter-spacing:4px}
+    .controls{gap:8px}
+    .zoom-btn{width:32px;height:32px;font-size:1rem}
+    .rec-btn{width:56px;height:56px}
+    .rec-btn::before{width:38px;height:38px}
+  }
+</style>
+</head>
+<body>
+
+<div id="startScreen">
+  <div class="start-logo">VOICE<span>CAM</span></div>
+  <div class="start-sub">COMMANDE VOCALE · ZOOM · ENREGISTREMENT</div>
+  <button class="start-btn" id="startBtn">▶ DÉMARRER</button>
+  <div class="start-perms">Autorisations requises :<br>📷 Caméra · 🎤 Microphone</div>
+</div>
+
+<header>
+  <div class="logo">VOICE<span>CAM</span></div>
+  <div class="status-bar">
+    <span id="camDot" class="status-dot"></span><span id="camLabel">CAM OFF</span>
+    <span id="micDot" class="status-dot"></span><span id="micLabel">MIC OFF</span>
+    <span id="recDot" class="status-dot"></span><span id="recLabel">STANDBY</span>
+  </div>
+</header>
+
+<div class="main">
+  <div class="viewfinder-wrap">
+    <video id="videoEl" autoplay muted playsinline></video>
+    <div class="no-cam" id="noCam">
+      <div class="no-cam-icon">📷</div>
+      <div class="no-cam-text">APPUYEZ SUR DÉMARRER<br>POUR ACTIVER LA CAMÉRA</div>
+    </div>
+    <div class="hud">
+      <div class="corner tl"></div><div class="corner tr"></div>
+      <div class="corner bl"></div><div class="corner br"></div>
+      <div class="crosshair"></div>
+      <div class="rec-badge" id="recBadge">● REC</div>
+      <div class="zoom-hud" id="zoomHud">1.0×</div>
+      <div class="rec-timer" id="recTimer">00:00</div>
+      <div class="scanlines"></div>
+      <div class="cmd-flash" id="cmdFlash"></div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <div class="zoom-strip">
+      <button class="zoom-btn" onclick="changeZoom(-0.5)">−</button>
+      <div class="zoom-track"><div class="zoom-fill" id="zoomFill" style="width:2%"></div></div>
+      <button class="zoom-btn" onclick="changeZoom(0.5)">+</button>
+    </div>
+    <button class="rec-btn" id="recBtn" onclick="toggleRecording()"></button>
+    <div style="display:flex;justify-content:flex-end;">
+      <button class="mic-btn" id="micBtn">🎤</button>
+    </div>
+  </div>
+
+  <div class="voice-panel">
+    <div class="mic-btn" id="micIndicator" style="pointer-events:none;font-size:1rem;">🎤</div>
+    <div class="voice-info">
+      <div class="voice-label">COMMANDE VOCALE — APPUYER 🎤</div>
+      <div class="voice-text" id="voiceText">Appuyer 🎤 puis parler</div>
+    </div>
+  </div>
+
+  <div class="section-label">COMMANDES VOCALES</div>
+  <div class="cmds-grid">
+    <div class="cmd-card"><div class="cmd-word">"ENREGISTRER"</div><div class="cmd-desc">Démarre la vidéo</div></div>
+    <div class="cmd-card"><div class="cmd-word">"STOP" / "ARRÊTER"</div><div class="cmd-desc">Arrête l'enregistrement</div></div>
+    <div class="cmd-card"><div class="cmd-word">"ZOOM PLUS"</div><div class="cmd-desc">Zoom avant</div></div>
+    <div class="cmd-card"><div class="cmd-word">"ZOOM MOINS"</div><div class="cmd-desc">Zoom arrière</div></div>
+    <div class="cmd-card"><div class="cmd-word">"ZOOM DEUX" … "ZOOM CINQ"</div><div class="cmd-desc">Zoom direct ×2–×5</div></div>
+    <div class="cmd-card"><div class="cmd-word">"ZOOM MAX" / "ZOOM RESET"</div><div class="cmd-desc">Max ou normal</div></div>
+    <div class="cmd-card"><div class="cmd-word">"PHOTO"</div><div class="cmd-desc">Capture une photo</div></div>
+  </div>
+</div>
+
+<script>
+// ── STATE ──────────────────────────────────────────────────
+let stream = null;
+let mediaRecorder = null;
+let recordedChunks = [];
+let isRecording = false;
+let zoomLevel = 1.0;
+const MIN_ZOOM = 1.0;
+const MAX_ZOOM = 5.0;
+let recInterval = null;
+let recSeconds = 0;
+let recognition = null;
+let isListening = false;
+
+// ── INIT ───────────────────────────────────────────────────
+document.getElementById('startBtn').addEventListener('click', initApp);
+
+async function initApp() {
+  document.getElementById('startScreen').style.display = 'none';
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode:'environment', width:{ideal:1280}, height:{ideal:720} },
+      audio: true
+    });
+    document.getElementById('videoEl').srcObject = stream;
+    document.getElementById('noCam').style.display = 'none';
+    setStatus('cam', true, 'CAM ON');
+  } catch(e) {
+    document.getElementById('noCam').querySelector('.no-cam-text').textContent = 'ACCÈS CAMÉRA REFUSÉ\n' + e.message;
+  }
+  initVoice();
+}
+
+// ── STATUS ─────────────────────────────────────────────────
+function setStatus(type, active, label, recording=false) {
+  document.getElementById(type+'Dot').className = 'status-dot'+(recording?' recording':active?' active':'');
+  document.getElementById(type+'Label').textContent = label;
+}
+
+// ── ZOOM ───────────────────────────────────────────────────
+function setZoom(level) {
+  zoomLevel = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Math.round(level*10)/10));
+  document.getElementById('videoEl').style.transform = 'scale('+zoomLevel+')';
+  document.getElementById('zoomHud').textContent = zoomLevel.toFixed(1)+'×';
+  const pct = ((zoomLevel-MIN_ZOOM)/(MAX_ZOOM-MIN_ZOOM))*100;
+  document.getElementById('zoomFill').style.width = Math.max(2,pct)+'%';
+  flashFeedback();
+}
+function changeZoom(delta) { setZoom(zoomLevel+delta); }
+
+// ── RECORDING ──────────────────────────────────────────────
+function toggleRecording() { isRecording ? stopRecording() : startRecording(); }
+
+function startRecording() {
+  if (!stream || isRecording) return;
+  recordedChunks = [];
+  const opts = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? {mimeType:'video/webm;codecs=vp9'}
+             : MediaRecorder.isTypeSupported('video/webm') ? {mimeType:'video/webm'} : {};
+  mediaRecorder = new MediaRecorder(stream, opts);
+  mediaRecorder.ondataavailable = e => { if(e.data.size>0) recordedChunks.push(e.data); };
+  mediaRecorder.onstop = saveVideo;
+  mediaRecorder.start(100);
+  isRecording = true; recSeconds = 0;
+  document.getElementById('recBadge').classList.add('show');
+  document.getElementById('recTimer').classList.add('show');
+  document.getElementById('recBtn').classList.add('recording');
+  setStatus('rec', true, 'REC', true);
+  recInterval = setInterval(() => {
+    recSeconds++;
+    const m = String(Math.floor(recSeconds/60)).padStart(2,'0');
+    const s = String(recSeconds%60).padStart(2,'0');
+    document.getElementById('recTimer').textContent = m+':'+s;
+  }, 1000);
+  showVoiceFeedback('▶ ENREGISTREMENT DÉMARRÉ', true);
+}
+
+function stopRecording() {
+  if (!isRecording || !mediaRecorder) return;
+  mediaRecorder.stop(); isRecording = false; clearInterval(recInterval);
+  document.getElementById('recBadge').classList.remove('show');
+  document.getElementById('recTimer').classList.remove('show');
+  document.getElementById('recBtn').classList.remove('recording');
+  setStatus('rec', false, 'STANDBY');
+  showVoiceFeedback('■ ARRÊTÉ — SAUVEGARDE...');
+}
+
+function saveVideo() {
+  const blob = new Blob(recordedChunks, {type:'video/webm'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'voicecam_'+Date.now()+'.webm';
+  a.click();
+  showVoiceFeedback('✓ VIDÉO TÉLÉCHARGÉE', true);
+}
+
+// ── PHOTO ──────────────────────────────────────────────────
+function takePhoto() {
+  if (!stream) return;
+  const video = document.getElementById('videoEl');
+  const canvas = document.createElement('canvas');
+  canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+  canvas.getContext('2d').drawImage(video,0,0);
+  canvas.toBlob(blob => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'voicecam_photo_'+Date.now()+'.jpg';
+    a.click();
+  }, 'image/jpeg', 0.95);
+  showVoiceFeedback('📷 PHOTO PRISE', true);
+  flashFeedback('rgba(255,255,255,0.3)');
+}
+
+// ── VOICE ──────────────────────────────────────────────────
+function initVoice() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { showVoiceFeedback('❌ Vocal non supporté sur ce navigateur'); return; }
+
+  const micBtn = document.getElementById('micBtn');
+
+  micBtn.addEventListener('touchstart', e => { e.preventDefault(); startListening(); }, {passive:false});
+  micBtn.addEventListener('click', () => { if (!isListening) startListening(); else stopListening(); });
+}
+
+function startListening() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR || isListening) return;
+
+  recognition = new SR();
+  recognition.lang = 'fr-FR';
+  recognition.continuous = false;
+  recognition.interimResults = false;
+  recognition.maxAlternatives = 3;
+
+  recognition.onstart = () => {
+    isListening = true;
+    document.getElementById('micBtn').classList.add('listening');
+    document.getElementById('micIndicator').classList.add('listening');
+    setStatus('mic', true, 'MIC ON');
+    showVoiceFeedback('🔴 Parlez...');
+  };
+
+  recognition.onresult = event => {
+    const alts = [];
+    for (let i=0; i<event.results[0].length; i++)
+      alts.push(event.results[0][i].transcript.toLowerCase().trim());
+    showVoiceFeedback('"'+alts[0]+'"', true);
+    processCommand(alts);
+  };
+
+  recognition.onerror = e => {
+    const msgs = {'not-allowed':'❌ Micro refusé','no-speech':'💬 Rien entendu','network':'❌ Erreur réseau'};
+    showVoiceFeedback(msgs[e.error] || '❌ '+e.error);
+    stopListening();
+  };
+
+  recognition.onend = () => stopListening();
+
+  try { recognition.start(); } catch(e) { showVoiceFeedback('❌ '+e.message); }
+}
+
+function stopListening() {
+  isListening = false;
+  document.getElementById('micBtn').classList.remove('listening');
+  document.getElementById('micIndicator').classList.remove('listening');
+  setStatus('mic', false, 'MIC OFF');
+  try { if(recognition) recognition.stop(); } catch(e){}
+}
+
+// ── COMMANDS ───────────────────────────────────────────────
+function processCommand(alts) {
+  for (const t of alts) { if (matchCmd(t)) return; }
+  showVoiceFeedback('❓ Non reconnu: "'+alts[0]+'"');
+}
+
+function matchCmd(t) {
+  if (/enregistr|démarre|record|start|film/.test(t)) { startRecording(); return true; }
+  if (/stop|arrêt|fin|termin/.test(t))               { stopRecording();  return true; }
+  if (/photo|capture|snap/.test(t))                  { takePhoto();      return true; }
+  const zm = t.match(/zoom\s*(un|1|deux|2|trois|3|quatre|4|cinq|5)/);
+  if (zm) { const map={un:1,'1':1,deux:2,'2':2,trois:3,'3':3,quatre:4,'4':4,cinq:5,'5':5}; setZoom(map[zm[1]]); showVoiceFeedback('ZOOM → ×'+map[zm[1]],true); return true; }
+  if (/zoom.*(max|maximum)/.test(t))                          { setZoom(MAX_ZOOM); showVoiceFeedback('ZOOM MAX ×'+MAX_ZOOM,true); return true; }
+  if (/zoom.*(reset|normal|zéro|mini)/.test(t))               { setZoom(1); showVoiceFeedback('ZOOM RESET ×1',true); return true; }
+  if (/zoom.*(plus|avant|agrand|gross)|zoomer/.test(t))       { changeZoom(0.5); showVoiceFeedback('ZOOM + → ×'+zoomLevel.toFixed(1),true); return true; }
+  if (/zoom.*(moins|arrière|rédui|petit)|dézoom/.test(t))     { changeZoom(-0.5); showVoiceFeedback('ZOOM − → ×'+zoomLevel.toFixed(1),true); return true; }
+  return false;
+}
+
+// ── FEEDBACK ───────────────────────────────────────────────
+function showVoiceFeedback(text, isCmd=false) {
+  const el = document.getElementById('voiceText');
+  el.textContent = text;
+  el.className = 'voice-text'+(isCmd?' cmd':'');
+}
+
+function flashFeedback(color='rgba(0,255,136,0.15)') {
+  const el = document.getElementById('cmdFlash');
+  el.style.background = color;
+  el.classList.add('show');
+  setTimeout(()=>el.classList.remove('show'), 150);
+}
+</script>
+</body>
+</html>
