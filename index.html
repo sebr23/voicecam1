@@ -7,6 +7,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface@0.0.7/dist/blazeface.min.js"></script>
 <style>
 :root{
   --red:#ff2d2d;--green:#00ff88;--blue:#00c8ff;--orange:#ff9900;--purple:#bb88ff;
@@ -292,6 +293,7 @@ select.setting-sel{background:var(--panel2);border:1px solid var(--border);color
         <button class="rec-btn" id="recBtnFs" onclick="startCountdownOrRec()"></button>
         <button class="auto-btn" id="autoZoomBtnFs" onclick="toggleAutoZoom()">AUTO ZOOM</button>
         <button class="ic-btn" id="micBtnFs">🎤</button>
+        <button class="ic-btn" id="trackBtnFs" onclick="toggleTracking()" title="Suivi personne">👤</button>
         <button class="ic-btn" id="gridBtnFs" onclick="toggleGrid()" title="Grille">⊞</button>
         <button class="ic-btn" id="flashBtnFs" onclick="toggleFlash()" title="Flash">⚡</button>
       </div>
@@ -312,6 +314,7 @@ select.setting-sel{background:var(--panel2);border:1px solid var(--border);color
       <button class="auto-btn" id="autoZoomBtn" onclick="toggleAutoZoom()">AUTO</button>
       <button class="ic-btn" id="micBtn" title="Activer écoute permanente">🎤</button>
       <button class="ic-btn" id="gridBtn" onclick="toggleGrid()" title="Grille">⊞</button>
+      <button class="ic-btn" id="trackBtn" onclick="toggleTracking()" title="Suivi automatique personne">👤</button>
       <button class="ic-btn" id="flashBtn" onclick="toggleFlash()" title="Flash / Torche">⚡</button>
       <button class="ic-btn" id="tpBtn" onclick="toggleTeleprompter()" title="Téléprompteur">📝</button>
       <button class="ic-btn" id="fsBtn" onclick="toggleFullscreen()" title="Plein écran">⛶</button>
@@ -421,6 +424,7 @@ select.setting-sel{background:var(--panel2);border:1px solid var(--border);color
       <div class="cmd-card"><div class="cmd-word">"ZOOM DEUX" … "HUIT"</div><div class="cmd-desc">Zoom direct ×2 à ×8</div></div>
       <div class="cmd-card"><div class="cmd-word">"ZOOM MAX / RESET"</div><div class="cmd-desc">Max ×8 ou retour ×1</div></div>
       <div class="cmd-card"><div class="cmd-word">"ZOOM AUTO"</div><div class="cmd-desc">Active l'IA zoom auto</div></div>
+      <div class="cmd-card"><div class="cmd-word">"SUIVI" / "TRACKING"</div><div class="cmd-desc">Active le suivi automatique</div></div>
       <div class="cmd-card"><div class="cmd-word">"GRILLE"</div><div class="cmd-desc">Affiche la grille tiers</div></div>
       <div class="cmd-card"><div class="cmd-word">"QUALITÉ AUTO"</div><div class="cmd-desc">Amélioration auto image</div></div>
       <div class="cmd-card"><div class="cmd-word">"PLEIN ÉCRAN"</div><div class="cmd-desc">Mode plein écran</div></div>
@@ -807,63 +811,260 @@ function takePhoto() {
 }
 
 // ── AI MODEL ───────────────────────────────────────────────
+let faceModel = null;
+const FR_NAMES={person:'Personne',car:'Voiture',cat:'Chat',dog:'Chien',bottle:'Bouteille',cell_phone:'Téléphone',laptop:'Ordinateur',book:'Livre',cup:'Tasse',chair:'Chaise',tv:'TV',keyboard:'Clavier',mouse:'Souris',backpack:'Sac',bicycle:'Vélo',bird:'Oiseau',horse:'Cheval',scissors:'Ciseaux',clock:'Horloge',remote:'Télécommande'};
+let trackingEnabled = false;
+
+// Tracking state — position lissée
+let trackX = 0.5, trackY = 0.5; // centre normalisé 0-1
+let trackW = 0.5, trackH = 0.5; // taille normalisée
+let smoothX = 0.5, smoothY = 0.5;
+let smoothW = 0.5, smoothH = 0.5;
+const SMOOTH = 0.08; // fluidité du suivi (plus bas = plus doux)
+
 async function loadAIModel() {
-  setStatus('ai',false,'AI LOAD');
-  document.getElementById('detectText').textContent='Chargement IA...';
+  setStatus('ai', false, 'AI LOAD');
+  document.getElementById('detectText').textContent = 'Chargement IA...';
   try {
-    cocoModel=await cocoSsd.load({base:'lite_mobilenet_v2'});
-    setStatus('ai',true,'AI ON');
-    document.getElementById('aiBadge').textContent='AI READY';
-    document.getElementById('detectText').textContent='IA prête — montrez quelque chose !';
+    // Charger BlazeFace (détection visage rapide) ET COCO-SSD (corps entier)
+    [faceModel, cocoModel] = await Promise.all([
+      blazeface.load(),
+      cocoSsd.load({ base: 'lite_mobilenet_v2' })
+    ]);
+    setStatus('ai', true, 'AI ON');
+    document.getElementById('aiBadge').textContent = 'AI READY';
+    document.getElementById('detectText').textContent = 'IA prête — activez le suivi 👤';
     detectLoop();
   } catch(e) {
-    setStatus('ai',false,'AI ERR');
-    document.getElementById('detectText').textContent='IA non disponible';
+    // Fallback COCO seulement
+    try {
+      cocoModel = await cocoSsd.load({ base: 'lite_mobilenet_v2' });
+      setStatus('ai', true, 'AI ON');
+      document.getElementById('aiBadge').textContent = 'AI READY';
+      document.getElementById('detectText').textContent = 'IA prête (mode basique)';
+      detectLoop();
+    } catch(e2) {
+      setStatus('ai', false, 'AI ERR');
+      document.getElementById('detectText').textContent = 'IA non disponible';
+    }
   }
 }
 
 async function detectLoop() {
-  if(!cocoModel) return;
-  const video=document.getElementById('videoEl');
-  if(video.readyState>=2) {
+  if (!cocoModel && !faceModel) return;
+  const video = document.getElementById('videoEl');
+  if (video.readyState >= 2) {
     try {
-      const predictions=await cocoModel.detect(video);
-      handleDetections(predictions);
-    } catch(e){}
+      // Priorité : détection visage (plus précis pour personnes)
+      if (faceModel) {
+        const faces = await faceModel.estimateFaces(video, false);
+        if (faces && faces.length > 0) {
+          handleFaceDetections(faces, video);
+        } else {
+          // Fallback corps entier si pas de visage
+          const preds = await cocoModel.detect(video);
+          handleBodyDetections(preds, video);
+        }
+      } else if (cocoModel) {
+        const preds = await cocoModel.detect(video);
+        handleBodyDetections(preds, video);
+      }
+    } catch(e) {}
   }
-  setTimeout(detectLoop,200);
+  setTimeout(detectLoop, 100); // 10fps pour fluidité
 }
 
-const FR_NAMES={person:'Personne',car:'Voiture',cat:'Chat',dog:'Chien',bottle:'Bouteille',cell_phone:'Téléphone',laptop:'Ordinateur',book:'Livre',cup:'Tasse',chair:'Chaise',tv:'TV',keyboard:'Clavier',mouse:'Souris',backpack:'Sac',bicycle:'Vélo',bird:'Oiseau',horse:'Cheval',scissors:'Ciseaux',clock:'Horloge',remote:'Télécommande'};
+// ── DÉTECTION VISAGE (BlazeFace) ──────────────────────────
+function handleFaceDetections(faces, video) {
+  const wrap = document.getElementById('viewfinderWrap');
+  const vW = video.videoWidth || 640;
+  const vH = video.videoHeight || 480;
+  const wW = wrap.clientWidth;
+  const wH = wrap.clientHeight;
 
-function handleDetections(predictions) {
-  const box=document.getElementById('detectionBox');
-  const label=document.getElementById('detectionLabel');
-  const detectText=document.getElementById('detectText');
-  const video=document.getElementById('videoEl');
-  const wrap=document.getElementById('viewfinderWrap');
-  if(!predictions||predictions.length===0){
-    box.style.display='none';
-    detectText.textContent='Aucun objet détecté';
-    document.getElementById('fsDetectText').textContent='🎯 Aucun objet';
-    if(autoZoomEnabled) targetZoom=1.0;
+  // Si plusieurs personnes, prendre la plus grande (plus proche)
+  const best = faces.reduce((a, b) => {
+    const aW = a.bottomRightCorner[0] - a.topLeftCorner[0];
+    const bW = b.bottomRightCorner[0] - b.topLeftCorner[0];
+    return aW > bW ? a : b;
+  });
+
+  const x = best.topLeftCorner[0];
+  const y = best.topLeftCorner[1];
+  const w = best.bottomRightCorner[0] - x;
+  const h = best.bottomRightCorner[1] - y;
+
+  // Étendre le cadre pour inclure le corps (visage x4 vers le bas)
+  const bodyX = Math.max(0, x - w * 0.8);
+  const bodyY = Math.max(0, y - h * 0.3);
+  const bodyW = Math.min(vW - bodyX, w * 2.6);
+  const bodyH = Math.min(vH - bodyY, h * 5.5);
+
+  updateTracking(bodyX, bodyY, bodyW, bodyH, vW, vH, wW, wH,
+    'Visage détecté ' + Math.round(best.probability?.[0] * 100 || 95) + '%');
+}
+
+// ── DÉTECTION CORPS (COCO-SSD) ────────────────────────────
+function handleBodyDetections(predictions, video) {
+  const wrap = document.getElementById('viewfinderWrap');
+  const vW = video.videoWidth || 640;
+  const vH = video.videoHeight || 480;
+  const wW = wrap.clientWidth;
+  const wH = wrap.clientHeight;
+
+  if (!predictions || predictions.length === 0) {
+    noPerson();
     return;
   }
-  const best=predictions.reduce((a,b)=>a.score>b.score?a:b);
-  if(best.score<0.4){box.style.display='none';return;}
-  const [x,y,w,h]=best.bbox;
-  const vW=video.videoWidth||640, vH=video.videoHeight||480;
-  const wW=wrap.clientWidth, wH=wrap.clientHeight;
-  box.style.cssText=`display:block;left:${x/vW*wW}px;top:${y/vH*wH}px;width:${w/vW*wW}px;height:${h/vH*wH}px;border:2px solid var(--green);border-radius:3px;box-shadow:0 0 10px rgba(0,255,136,0.3);transition:all 0.15s;`;
-  const conf=Math.round(best.score*100);
-  const fr=FR_NAMES[best.class]||best.class;
-  label.textContent=fr.toUpperCase()+' '+conf+'%';
-  const txt='🎯 '+fr+' ('+conf+'%)';
-  detectText.textContent=txt;
-  document.getElementById('fsDetectText').textContent=txt;
-  if(autoZoomEnabled) {
-    const area=(w*h)/(vW*vH);
-    targetZoom=area<0.08?Math.min(MAX_ZOOM,currentSmoothedZoom+0.3):area<0.15?3:area<0.3?2:area>0.5?Math.max(MIN_ZOOM,currentSmoothedZoom-0.2):1.5;
+
+  // Filtrer uniquement les personnes
+  const people = predictions.filter(p => p.class === 'person' && p.score > 0.4);
+
+  if (people.length === 0) {
+    // Pas de personne — afficher quand même les autres objets
+    const best = predictions.reduce((a, b) => a.score > b.score ? a : b);
+    if (best.score >= 0.4) {
+      const [x, y, w, h] = best.bbox;
+      const fr = FR_NAMES[best.class] || best.class;
+      showDetectionBox(x, y, w, h, vW, vH, wW, wH, fr + ' ' + Math.round(best.score*100) + '%');
+      document.getElementById('detectText').textContent = '🎯 ' + fr + ' (' + Math.round(best.score*100) + '%)';
+      document.getElementById('fsDetectText').textContent = '🎯 ' + fr;
+    } else {
+      noPerson();
+    }
+    return;
+  }
+
+  // Si plusieurs personnes — encadrer toutes
+  if (people.length > 1) {
+    const xs = people.map(p => p.bbox[0]);
+    const ys = people.map(p => p.bbox[1]);
+    const x2s = people.map(p => p.bbox[0] + p.bbox[2]);
+    const y2s = people.map(p => p.bbox[1] + p.bbox[3]);
+    const gx = Math.min(...xs);
+    const gy = Math.min(...ys);
+    const gw = Math.max(...x2s) - gx;
+    const gh = Math.max(...y2s) - gy;
+    updateTracking(gx, gy, gw, gh, vW, vH, wW, wH, people.length + ' personnes');
+  } else {
+    const [x, y, w, h] = people[0].bbox;
+    updateTracking(x, y, w, h, vW, vH, wW, wH,
+      'Personne ' + Math.round(people[0].score * 100) + '%');
+  }
+}
+
+function updateTracking(x, y, w, h, vW, vH, wW, wH, label) {
+  // Mettre à jour la cible
+  trackX = (x + w/2) / vW;
+  trackY = (y + h/2) / vH;
+  trackW = w / vW;
+  trackH = h / vH;
+
+  // Afficher le cadre de détection
+  showDetectionBox(x, y, w, h, vW, vH, wW, wH, label);
+  document.getElementById('detectText').textContent = '👤 ' + label;
+  document.getElementById('fsDetectText').textContent = '👤 ' + label;
+
+  // Appliquer le suivi si activé
+  if (trackingEnabled) applyTracking();
+}
+
+// ── SUIVI FLUIDE ──────────────────────────────────────────
+let trackingLoop = null;
+
+function applyTracking() {
+  if (!trackingEnabled) return;
+
+  const video = document.getElementById('videoEl');
+  const wrap = document.getElementById('viewfinderWrap');
+
+  // Lisser la position
+  smoothX += (trackX - smoothX) * SMOOTH;
+  smoothY += (trackY - smoothY) * SMOOTH;
+  smoothW += (trackW - smoothW) * SMOOTH;
+  smoothH += (trackH - smoothH) * SMOOTH;
+
+  // Calculer le décalage pour recentrer la personne
+  const offsetX = (0.5 - smoothX) * 100; // % de décalage horizontal
+  const offsetY = (0.5 - smoothY) * 100; // % de décalage vertical
+
+  // Zoom adaptatif : si personne occupe <25% = zoomer, >60% = dézoomer
+  const personArea = smoothW * smoothH;
+  let desiredZoom;
+  if (personArea < 0.10) desiredZoom = Math.min(MAX_ZOOM, zoomLevel + 0.15);
+  else if (personArea < 0.20) desiredZoom = 2.5;
+  else if (personArea < 0.35) desiredZoom = 1.8;
+  else if (personArea < 0.50) desiredZoom = 1.4;
+  else desiredZoom = Math.max(MIN_ZOOM, zoomLevel - 0.1);
+
+  // Appliquer zoom + translation (suivi de caméra)
+  targetZoom += (desiredZoom - targetZoom) * 0.05;
+  currentSmoothedZoom += (targetZoom - currentSmoothedZoom) * 0.06;
+  const z = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, currentSmoothedZoom));
+
+  // Limiter le décalage pour ne pas sortir du cadre
+  const maxOffset = ((z - 1) / z) * 50;
+  const clampedX = Math.max(-maxOffset, Math.min(maxOffset, offsetX));
+  const clampedY = Math.max(-maxOffset, Math.min(maxOffset, offsetY));
+
+  video.style.transform = `scale(${z}) translate(${clampedX/z}%, ${clampedY/z}%)`;
+
+  // Mettre à jour les indicateurs
+  document.getElementById('zoomHud').textContent = z.toFixed(1) + '×';
+  const pct = ((z - MIN_ZOOM) / (MAX_ZOOM - MIN_ZOOM)) * 100;
+  document.getElementById('zoomFill').style.width = Math.max(2, pct) + '%';
+  document.getElementById('zoomFillFs').style.width = Math.max(2, pct) + '%';
+}
+
+function noPerson() {
+  document.getElementById('detectionBox').style.display = 'none';
+  document.getElementById('detectText').textContent = '🔍 Recherche personne...';
+  document.getElementById('fsDetectText').textContent = '🔍 Recherche...';
+  if (trackingEnabled) {
+    // Revenir doucement au centre
+    smoothX += (0.5 - smoothX) * 0.03;
+    smoothY += (0.5 - smoothY) * 0.03;
+    const video = document.getElementById('videoEl');
+    const offsetX = (0.5 - smoothX) * 100;
+    const offsetY = (0.5 - smoothY) * 100;
+    video.style.transform = `scale(${currentSmoothedZoom}) translate(${offsetX/currentSmoothedZoom}%, ${offsetY/currentSmoothedZoom}%)`;
+  }
+}
+
+function showDetectionBox(x, y, w, h, vW, vH, wW, wH, label) {
+  const box = document.getElementById('detectionBox');
+  const lbl = document.getElementById('detectionLabel');
+  box.style.cssText = `display:block;left:${x/vW*wW}px;top:${y/vH*wH}px;width:${w/vW*wW}px;height:${h/vH*wH}px;border:2px solid var(--green);border-radius:3px;box-shadow:0 0 10px rgba(0,255,136,0.3);position:absolute;transition:all 0.1s;`;
+  lbl.textContent = label;
+}
+
+// ── TOGGLE TRACKING ───────────────────────────────────────
+function toggleTracking() {
+  trackingEnabled = !trackingEnabled;
+  const ids = ['trackBtn', 'trackBtnFs'];
+  ids.forEach(id => {
+    const b = document.getElementById(id);
+    if (!b) return;
+    b.className = trackingEnabled ? 'ic-btn active' : 'ic-btn';
+    b.style.color = trackingEnabled ? 'var(--green)' : '';
+    b.style.borderColor = trackingEnabled ? 'var(--green)' : '';
+  });
+
+  if (trackingEnabled) {
+    autoZoomEnabled = false; // Désactiver auto-zoom basique
+    document.getElementById('autoZoomBtn').textContent = 'AUTO ZOOM';
+    document.getElementById('autoZoomBtn').className = 'auto-btn';
+    showVoiceFeedback('👤 SUIVI PERSONNE ACTIVÉ', true);
+    // Démarrer la boucle de suivi fluide
+    if (trackingLoop) clearInterval(trackingLoop);
+    trackingLoop = setInterval(applyTracking, 50);
+  } else {
+    if (trackingLoop) clearInterval(trackingLoop);
+    showVoiceFeedback('👤 Suivi désactivé');
+    // Réinitialiser la caméra
+    document.getElementById('videoEl').style.transform = 'scale(1)';
+    setZoom(1);
+    smoothX = 0.5; smoothY = 0.5;
   }
 }
 
@@ -963,7 +1164,8 @@ function matchCmd(t) {
   if(/zoom.*(auto|ia)|auto.*zoom/.test(t)){toggleAutoZoom();return true;}
   if(/qualité.*(auto|ia)|auto.*qualité/.test(t)){toggleAutoQuality();return true;}
   if(/flash|torche|lumière/.test(t)){toggleFlash();return true;}
-  if(/plein.*(écran|ecran)|fullscreen/.test(t)){toggleFullscreen();return true;}
+  if(/suivi|tracking|suis|follow|poursui/.test(t)){toggleTracking();return true;}
+  if(/grille|grid|tiers/.test(t)){toggleGrid();return true;}
   if(/prompt|téléprompt|telepromp/.test(t)){toggleTeleprompter();return true;}
   const zm=t.match(/zoom\s*(un|1|deux|2|trois|3|quatre|4|cinq|5|six|6|sept|7|huit|8)/);
   if(zm){const map={un:1,'1':1,deux:2,'2':2,trois:3,'3':3,quatre:4,'4':4,cinq:5,'5':5,six:6,'6':6,sept:7,'7':7,huit:8,'8':8};setZoom(map[zm[1]]);showVoiceFeedback('ZOOM → ×'+map[zm[1]],true);return true;}
