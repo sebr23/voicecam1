@@ -310,7 +310,7 @@ select.setting-sel{background:var(--panel2);border:1px solid var(--border);color
     <button class="rec-btn" id="recBtn" onclick="startCountdownOrRec()" title="Enregistrer"></button>
     <div class="right-btns">
       <button class="auto-btn" id="autoZoomBtn" onclick="toggleAutoZoom()">AUTO</button>
-      <button class="ic-btn" id="micBtn" title="Commande vocale">🎤</button>
+      <button class="ic-btn" id="micBtn" title="Activer écoute permanente">🎤</button>
       <button class="ic-btn" id="gridBtn" onclick="toggleGrid()" title="Grille">⊞</button>
       <button class="ic-btn" id="flashBtn" onclick="toggleFlash()" title="Flash / Torche">⚡</button>
       <button class="ic-btn" id="tpBtn" onclick="toggleTeleprompter()" title="Téléprompteur">📝</button>
@@ -868,20 +868,41 @@ function handleDetections(predictions) {
 }
 
 // ── VOICE ──────────────────────────────────────────────────
+let alwaysOnVoice = false;
+
 function initVoice() {
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
   if(!SR){showVoiceFeedback('❌ Vocal non supporté');return;}
   ['micBtn'].forEach(id=>{
     const btn=document.getElementById(id);
-    btn.addEventListener('touchstart',e=>{e.preventDefault();startListening();},{passive:false});
-    btn.addEventListener('click',()=>{if(!isListening)startListening();else stopListening();});
+    btn.addEventListener('touchstart',e=>{e.preventDefault();toggleAlwaysOnVoice();},{passive:false});
+    btn.addEventListener('click',()=>toggleAlwaysOnVoice());
   });
+}
+
+function toggleAlwaysOnVoice() {
+  alwaysOnVoice = !alwaysOnVoice;
+  if (alwaysOnVoice) {
+    startListening();
+    showVoiceFeedback('🎙️ Écoute permanente activée', true);
+    ['micBtn','micBtnFs'].forEach(id=>{
+      const b = document.getElementById(id);
+      if(b) { b.style.boxShadow='0 0 20px rgba(0,255,136,0.6)'; b.title='Cliquer pour désactiver'; }
+    });
+  } else {
+    stopListening();
+    showVoiceFeedback('🔇 Écoute désactivée');
+    ['micBtn','micBtnFs'].forEach(id=>{
+      const b = document.getElementById(id);
+      if(b) { b.style.boxShadow=''; b.title='Commande vocale'; }
+    });
+  }
 }
 
 function initFsButtons() {
   const fsMic=document.getElementById('micBtnFs');
-  fsMic.addEventListener('touchstart',e=>{e.preventDefault();startListening();},{passive:false});
-  fsMic.addEventListener('click',()=>{if(!isListening)startListening();else stopListening();});
+  fsMic.addEventListener('touchstart',e=>{e.preventDefault();toggleAlwaysOnVoice();},{passive:false});
+  fsMic.addEventListener('click',()=>toggleAlwaysOnVoice());
   // Auto-hide overlay
   const wrap=document.getElementById('viewfinderWrap');
   wrap.addEventListener('mousemove',showFsOverlay);
@@ -900,7 +921,7 @@ function startListening() {
     isListening=true;
     ['micBtn','micBtnFs'].forEach(id=>document.getElementById(id)?.classList.add('listening'));
     setStatus('mic',true,'MIC ON');
-    showVoiceFeedback('🔴 Parlez...');
+    if(!alwaysOnVoice) showVoiceFeedback('🔴 Parlez...');
   };
   recognition.onresult=event=>{
     const alts=[];
@@ -909,18 +930,23 @@ function startListening() {
     processCommand(alts);
   };
   recognition.onerror=e=>{
-    const msgs={'not-allowed':'❌ Micro refusé','no-speech':'💬 Rien entendu','network':'❌ Réseau'};
+    if(e.error==='no-speech'&&alwaysOnVoice){stopListening();setTimeout(()=>{if(alwaysOnVoice)startListening();},300);return;}
+    const msgs={'not-allowed':'❌ Micro refusé — autorisez le micro','no-speech':'💬 Rien entendu','network':'❌ Réseau'};
     showVoiceFeedback(msgs[e.error]||'❌ '+e.error);
     stopListening();
   };
-  recognition.onend=()=>stopListening();
+  recognition.onend=()=>{
+    stopListening();
+    // Redémarre automatiquement si mode toujours actif
+    if(alwaysOnVoice) setTimeout(()=>{if(alwaysOnVoice)startListening();},300);
+  };
   try{recognition.start();}catch(e){showVoiceFeedback('❌ '+e.message);}
 }
 
 function stopListening() {
   isListening=false;
   ['micBtn','micBtnFs'].forEach(id=>document.getElementById(id)?.classList.remove('listening'));
-  setStatus('mic',false,'MIC OFF');
+  setStatus('mic',false,alwaysOnVoice?'AUTO':'MIC OFF');
   try{if(recognition)recognition.stop();}catch(e){}
 }
 
