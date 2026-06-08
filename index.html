@@ -5,92 +5,116 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Caméra vocale</title>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
 <style>
   :root {
-    --red: #ff2d2d; --green: #00ff88; --blue: #00c8ff;
-    --dark: #080c10; --dark2: #0d1318; --panel: #111820;
-    --border: #1e2d3a; --text: #c8dce8; --dim: #3a5060;
+    --red:#ff2d2d;--green:#00ff88;--blue:#00c8ff;
+    --dark:#080c10;--dark2:#0d1318;--panel:#111820;
+    --border:#1e2d3a;--text:#c8dce8;--dim:#3a5060;
   }
-  * { margin:0; padding:0; box-sizing:border-box; }
-  body { background:var(--dark); color:var(--text); font-family:'Space Mono',monospace; min-height:100vh; display:flex; flex-direction:column; align-items:center; overflow-x:hidden; }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{background:var(--dark);color:var(--text);font-family:'Space Mono',monospace;min-height:100vh;display:flex;flex-direction:column;align-items:center;overflow-x:hidden;}
 
-  header { width:100%; padding:14px 24px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid var(--border); background:var(--dark2); }
-  .logo { font-family:'Orbitron',monospace; font-weight:900; font-size:1.3rem; letter-spacing:4px; color:var(--blue); text-shadow:0 0 20px rgba(0,200,255,0.5); }
-  .logo span { color:var(--red); }
-  .status-bar { display:flex; gap:16px; align-items:center; font-size:0.65rem; letter-spacing:1px; color:var(--dim); }
-  .status-dot { width:7px; height:7px; border-radius:50%; background:var(--dim); display:inline-block; }
-  .status-dot.active { background:var(--green); box-shadow:0 0 8px var(--green); animation:pulse 1.5s infinite; }
-  .status-dot.recording { background:var(--red); box-shadow:0 0 8px var(--red); animation:pulse 0.8s infinite; }
-  @keyframes pulse { 0%,100%{opacity:1}50%{opacity:0.3} }
+  header{width:100%;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);background:var(--dark2);}
+  .logo{font-family:'Orbitron',monospace;font-weight:900;font-size:1.2rem;letter-spacing:4px;color:var(--blue);text-shadow:0 0 20px rgba(0,200,255,0.5);}
+  .logo span{color:var(--red);}
+  .status-bar{display:flex;gap:12px;align-items:center;font-size:0.6rem;letter-spacing:1px;color:var(--dim);}
+  .status-dot{width:7px;height:7px;border-radius:50%;background:var(--dim);display:inline-block;}
+  .status-dot.active{background:var(--green);box-shadow:0 0 8px var(--green);animation:pulse 1.5s infinite;}
+  .status-dot.recording{background:var(--red);box-shadow:0 0 8px var(--red);animation:pulse 0.8s infinite;}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}
 
-  .main { width:100%; max-width:900px; padding:20px 16px; display:flex; flex-direction:column; gap:16px; }
+  .main{width:100%;max-width:960px;padding:16px;display:flex;flex-direction:column;gap:14px;}
 
-  .viewfinder-wrap { position:relative; width:100%; aspect-ratio:16/9; background:#000; border:1px solid var(--border); overflow:hidden; border-radius:4px; }
-  #videoEl { width:100%; height:100%; object-fit:cover; display:block; transform-origin:center center; transition:transform 0.4s cubic-bezier(0.25,0.46,0.45,0.94); }
+  .viewfinder-wrap{position:relative;width:100%;aspect-ratio:16/9;background:#000;border:1px solid var(--border);overflow:hidden;border-radius:6px;}
+  #videoEl{width:100%;height:100%;object-fit:cover;display:block;transform-origin:center center;transition:transform 0.6s cubic-bezier(0.25,0.46,0.45,0.94);}
 
-  .hud { position:absolute; inset:0; pointer-events:none; }
-  .corner { position:absolute; width:28px; height:28px; border-color:var(--blue); border-style:solid; opacity:0.7; }
-  .corner.tl { top:12px; left:12px; border-width:2px 0 0 2px; }
-  .corner.tr { top:12px; right:12px; border-width:2px 2px 0 0; }
-  .corner.bl { bottom:12px; left:12px; border-width:0 0 2px 2px; }
-  .corner.br { bottom:12px; right:12px; border-width:0 2px 2px 0; }
-  .crosshair { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:40px; height:40px; opacity:0.35; }
-  .crosshair::before,.crosshair::after { content:''; position:absolute; background:var(--blue); }
-  .crosshair::before { width:1px; height:100%; left:50%; transform:translateX(-50%); }
-  .crosshair::after { width:100%; height:1px; top:50%; transform:translateY(-50%); }
-  .rec-badge { position:absolute; top:14px; left:50%; transform:translateX(-50%); background:var(--red); color:#fff; font-family:'Orbitron',monospace; font-size:0.6rem; font-weight:700; letter-spacing:3px; padding:3px 10px; border-radius:2px; display:none; }
-  .rec-badge.show { display:block; animation:pulse 0.8s infinite; }
-  .zoom-hud { position:absolute; bottom:14px; right:14px; font-family:'Orbitron',monospace; font-size:0.75rem; font-weight:700; color:var(--blue); text-shadow:0 0 10px rgba(0,200,255,0.6); letter-spacing:2px; }
-  .rec-timer { position:absolute; bottom:14px; left:14px; font-family:'Orbitron',monospace; font-size:0.75rem; color:var(--red); display:none; letter-spacing:2px; }
-  .rec-timer.show { display:block; }
-  .scanlines { position:absolute; inset:0; background:repeating-linear-gradient(to bottom,transparent 0px,transparent 2px,rgba(0,0,0,0.08) 2px,rgba(0,0,0,0.08) 4px); pointer-events:none; }
-  .no-cam { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; background:var(--dark2); }
-  .no-cam-icon { font-size:3rem; opacity:0.3; }
-  .no-cam-text { font-size:0.75rem; color:var(--dim); letter-spacing:2px; text-align:center; line-height:1.8; }
-  .cmd-flash { position:absolute; inset:0; background:rgba(0,255,136,0.15); pointer-events:none; opacity:0; transition:opacity 0.1s; border-radius:4px; }
-  .cmd-flash.show { opacity:1; }
+  /* Quality filters applied via canvas overlay */
+  #canvasOverlay{position:absolute;inset:0;pointer-events:none;opacity:0;}
 
-  .controls { display:grid; grid-template-columns:1fr auto 1fr; align-items:center; gap:16px; }
-  .zoom-strip { display:flex; align-items:center; gap:8px; }
-  .zoom-btn { width:38px; height:38px; border-radius:50%; border:1px solid var(--border); background:var(--panel); color:var(--blue); font-size:1.1rem; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:all 0.15s; }
-  .zoom-btn:hover { border-color:var(--blue); background:rgba(0,200,255,0.08); }
-  .zoom-btn:active { transform:scale(0.9); }
-  .zoom-track { flex:1; height:4px; background:var(--border); border-radius:2px; position:relative; }
-  .zoom-fill { height:100%; background:linear-gradient(90deg,var(--blue),var(--green)); border-radius:2px; transition:width 0.4s; }
-  .rec-btn { width:64px; height:64px; border-radius:50%; border:3px solid var(--red); background:transparent; cursor:pointer; position:relative; transition:all 0.2s; display:flex; align-items:center; justify-content:center; }
-  .rec-btn::before { content:''; width:44px; height:44px; border-radius:50%; background:var(--red); transition:all 0.2s; }
-  .rec-btn.recording::before { border-radius:6px; width:28px; height:28px; }
-  .rec-btn:hover { box-shadow:0 0 20px rgba(255,45,45,0.4); }
-  .mic-btn { width:46px; height:46px; border-radius:50%; border:2px solid var(--border); background:var(--dark2); color:var(--dim); font-size:1.2rem; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:all 0.2s; flex-shrink:0; user-select:none; -webkit-user-select:none; }
-  .mic-btn.listening { border-color:var(--green); color:var(--green); background:rgba(0,255,136,0.08); box-shadow:0 0 16px rgba(0,255,136,0.3); animation:mic-pulse 1s infinite; }
-  @keyframes mic-pulse { 0%,100%{box-shadow:0 0 16px rgba(0,255,136,0.3)}50%{box-shadow:0 0 28px rgba(0,255,136,0.6)} }
+  .hud{position:absolute;inset:0;pointer-events:none;}
+  .corner{position:absolute;width:28px;height:28px;border-color:var(--blue);border-style:solid;opacity:0.7;}
+  .corner.tl{top:12px;left:12px;border-width:2px 0 0 2px;}
+  .corner.tr{top:12px;right:12px;border-width:2px 2px 0 0;}
+  .corner.bl{bottom:12px;left:12px;border-width:0 0 2px 2px;}
+  .corner.br{bottom:12px;right:12px;border-width:0 2px 2px 0;}
 
-  .voice-panel { background:var(--panel); border:1px solid var(--border); border-radius:4px; padding:14px 18px; display:flex; align-items:center; gap:16px; }
-  .voice-info { flex:1; min-width:0; }
-  .voice-label { font-size:0.6rem; letter-spacing:2px; color:var(--dim); text-transform:uppercase; margin-bottom:4px; }
-  .voice-text { font-size:0.8rem; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-height:1.2em; }
-  .voice-text.cmd { color:var(--green); }
+  /* Detection box */
+  #detectionBox{position:absolute;border:2px solid var(--green);border-radius:4px;display:none;transition:all 0.2s;box-shadow:0 0 12px rgba(0,255,136,0.4);}
+  #detectionLabel{position:absolute;top:-24px;left:0;background:var(--green);color:#000;font-family:'Orbitron',monospace;font-size:0.55rem;font-weight:700;padding:2px 8px;border-radius:2px;letter-spacing:1px;white-space:nowrap;}
 
-  .cmds-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:8px; }
-  .cmd-card { background:var(--panel); border:1px solid var(--border); border-radius:4px; padding:10px 12px; display:flex; flex-direction:column; gap:4px; }
-  .cmd-word { font-family:'Orbitron',monospace; font-size:0.65rem; color:var(--blue); letter-spacing:1px; }
-  .cmd-desc { font-size:0.6rem; color:var(--dim); letter-spacing:0.5px; }
-  .section-label { font-size:0.6rem; letter-spacing:3px; color:var(--dim); text-transform:uppercase; padding-bottom:6px; border-bottom:1px solid var(--border); }
+  .rec-badge{position:absolute;top:14px;left:50%;transform:translateX(-50%);background:var(--red);color:#fff;font-family:'Orbitron',monospace;font-size:0.6rem;font-weight:700;letter-spacing:3px;padding:3px 10px;border-radius:2px;display:none;}
+  .rec-badge.show{display:block;animation:pulse 0.8s infinite;}
+  .zoom-hud{position:absolute;bottom:14px;right:14px;font-family:'Orbitron',monospace;font-size:0.75rem;font-weight:700;color:var(--blue);text-shadow:0 0 10px rgba(0,200,255,0.6);letter-spacing:2px;}
+  .rec-timer{position:absolute;bottom:14px;left:14px;font-family:'Orbitron',monospace;font-size:0.75rem;color:var(--red);display:none;letter-spacing:2px;}
+  .rec-timer.show{display:block;}
 
-  #startScreen { position:fixed; inset:0; background:var(--dark); z-index:100; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:24px; padding:24px; }
-  .start-logo { font-family:'Orbitron',monospace; font-weight:900; font-size:2.5rem; letter-spacing:8px; color:var(--blue); text-shadow:0 0 40px rgba(0,200,255,0.5); text-align:center; }
-  .start-logo span { color:var(--red); }
-  .start-sub { font-size:0.7rem; letter-spacing:3px; color:var(--dim); text-align:center; }
-  .start-btn { background:transparent; border:2px solid var(--blue); color:var(--blue); font-family:'Orbitron',monospace; font-size:0.75rem; letter-spacing:3px; padding:14px 36px; cursor:pointer; transition:all 0.2s; border-radius:2px; }
-  .start-btn:hover { background:var(--blue); color:var(--dark); box-shadow:0 0 30px rgba(0,200,255,0.4); }
-  .start-perms { font-size:0.6rem; color:var(--dim); letter-spacing:1px; text-align:center; max-width:300px; line-height:1.8; }
+  /* AI badge */
+  .ai-badge{position:absolute;top:14px;right:14px;background:rgba(0,200,255,0.15);border:1px solid var(--blue);color:var(--blue);font-family:'Orbitron',monospace;font-size:0.5rem;letter-spacing:2px;padding:3px 8px;border-radius:2px;}
 
-  @media(max-width:500px) {
-    .start-logo{font-size:1.6rem;letter-spacing:4px}
-    .controls{gap:8px}
-    .zoom-btn{width:32px;height:32px;font-size:1rem}
-    .rec-btn{width:56px;height:56px}
-    .rec-btn::before{width:38px;height:38px}
+  .scanlines{position:absolute;inset:0;background:repeating-linear-gradient(to bottom,transparent 0px,transparent 2px,rgba(0,0,0,0.06) 2px,rgba(0,0,0,0.06) 4px);pointer-events:none;}
+  .no-cam{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:var(--dark2);}
+  .no-cam-icon{font-size:3rem;opacity:0.3;}
+  .no-cam-text{font-size:0.75rem;color:var(--dim);letter-spacing:2px;text-align:center;line-height:1.8;}
+  .cmd-flash{position:absolute;inset:0;background:rgba(0,255,136,0.15);pointer-events:none;opacity:0;transition:opacity 0.1s;border-radius:6px;}
+  .cmd-flash.show{opacity:1;}
+
+  /* Controls */
+  .controls{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:14px;}
+  .zoom-strip{display:flex;align-items:center;gap:8px;}
+  .zoom-btn{width:36px;height:36px;border-radius:50%;border:1px solid var(--border);background:var(--panel);color:var(--blue);font-size:1.1rem;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.15s;}
+  .zoom-btn:hover{border-color:var(--blue);background:rgba(0,200,255,0.08);}
+  .zoom-track{flex:1;height:4px;background:var(--border);border-radius:2px;}
+  .zoom-fill{height:100%;background:linear-gradient(90deg,var(--blue),var(--green));border-radius:2px;transition:width 0.4s;}
+  .rec-btn{width:62px;height:62px;border-radius:50%;border:3px solid var(--red);background:transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.2s;}
+  .rec-btn::before{content:'';width:42px;height:42px;border-radius:50%;background:var(--red);transition:all 0.2s;}
+  .rec-btn.recording::before{border-radius:6px;width:26px;height:26px;}
+  .rec-btn:hover{box-shadow:0 0 20px rgba(255,45,45,0.4);}
+  .mic-btn{width:44px;height:44px;border-radius:50%;border:2px solid var(--border);background:var(--dark2);color:var(--dim);font-size:1.1rem;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.2s;user-select:none;-webkit-user-select:none;}
+  .mic-btn.listening{border-color:var(--green);color:var(--green);background:rgba(0,255,136,0.08);box-shadow:0 0 16px rgba(0,255,136,0.3);animation:mic-pulse 1s infinite;}
+  @keyframes mic-pulse{0%,100%{box-shadow:0 0 16px rgba(0,255,136,0.3)}50%{box-shadow:0 0 28px rgba(0,255,136,0.6)}}
+
+  /* Panel row */
+  .panel-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .voice-panel,.detect-panel{background:var(--panel);border:1px solid var(--border);border-radius:4px;padding:12px 16px;display:flex;align-items:center;gap:12px;}
+  .voice-info{flex:1;min-width:0;}
+  .voice-label{font-size:0.55rem;letter-spacing:2px;color:var(--dim);text-transform:uppercase;margin-bottom:4px;}
+  .voice-text{font-size:0.75rem;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-height:1.2em;}
+  .voice-text.cmd{color:var(--green);}
+
+  /* Quality controls */
+  .quality-panel{background:var(--panel);border:1px solid var(--border);border-radius:4px;padding:12px 16px;}
+  .quality-row{display:flex;align-items:center;gap:10px;margin-bottom:8px;}
+  .quality-row:last-child{margin-bottom:0;}
+  .quality-label{font-size:0.55rem;letter-spacing:1px;color:var(--dim);width:90px;flex-shrink:0;}
+  .quality-slider{flex:1;-webkit-appearance:none;height:3px;background:var(--border);border-radius:2px;outline:none;}
+  .quality-slider::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:var(--blue);cursor:pointer;}
+  .quality-val{font-size:0.6rem;color:var(--blue);width:30px;text-align:right;}
+  .auto-btn{background:transparent;border:1px solid var(--border);color:var(--dim);font-family:'Space Mono',monospace;font-size:0.55rem;letter-spacing:1px;padding:4px 10px;cursor:pointer;border-radius:2px;transition:all 0.2s;}
+  .auto-btn.on{border-color:var(--green);color:var(--green);background:rgba(0,255,136,0.08);}
+
+  .cmds-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;}
+  .cmd-card{background:var(--panel);border:1px solid var(--border);border-radius:4px;padding:9px 11px;display:flex;flex-direction:column;gap:3px;}
+  .cmd-word{font-family:'Orbitron',monospace;font-size:0.6rem;color:var(--blue);letter-spacing:1px;}
+  .cmd-desc{font-size:0.55rem;color:var(--dim);}
+  .section-label{font-size:0.6rem;letter-spacing:3px;color:var(--dim);text-transform:uppercase;padding-bottom:6px;border-bottom:1px solid var(--border);}
+
+  #startScreen{position:fixed;inset:0;background:var(--dark);z-index:100;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;padding:24px;}
+  .start-logo{font-family:'Orbitron',monospace;font-weight:900;font-size:2.2rem;letter-spacing:8px;color:var(--blue);text-shadow:0 0 40px rgba(0,200,255,0.5);text-align:center;}
+  .start-logo span{color:var(--red);}
+  .start-sub{font-size:0.65rem;letter-spacing:3px;color:var(--dim);text-align:center;}
+  .start-features{display:flex;gap:16px;flex-wrap:wrap;justify-content:center;}
+  .feat{background:var(--panel);border:1px solid var(--border);border-radius:4px;padding:8px 14px;font-size:0.6rem;letter-spacing:1px;color:var(--text);}
+  .start-btn{background:transparent;border:2px solid var(--blue);color:var(--blue);font-family:'Orbitron',monospace;font-size:0.75rem;letter-spacing:3px;padding:14px 36px;cursor:pointer;transition:all 0.2s;border-radius:2px;}
+  .start-btn:hover{background:var(--blue);color:var(--dark);box-shadow:0 0 30px rgba(0,200,255,0.4);}
+
+  @media(max-width:600px){
+    .panel-row{grid-template-columns:1fr;}
+    .controls{gap:8px;}
+    .zoom-btn{width:30px;height:30px;}
+    .rec-btn{width:54px;height:54px;}
+    .rec-btn::before{width:36px;height:36px;}
   }
 </style>
 </head>
@@ -98,9 +122,14 @@
 
 <div id="startScreen">
   <div class="start-logo">VOICE<span>CAM</span></div>
-  <div class="start-sub">COMMANDE VOCALE · ZOOM · ENREGISTREMENT</div>
+  <div class="start-sub">AI · COMMANDE VOCALE · ZOOM AUTO · QUALITÉ HD</div>
+  <div class="start-features">
+    <div class="feat">🎯 Détection IA</div>
+    <div class="feat">🔍 Zoom automatique</div>
+    <div class="feat">✨ Qualité améliorée</div>
+    <div class="feat">🎙️ Commande vocale</div>
+  </div>
   <button class="start-btn" id="startBtn">▶ DÉMARRER</button>
-  <div class="start-perms">Autorisations requises :<br>📷 Caméra · 🎤 Microphone</div>
 </div>
 
 <header>
@@ -109,23 +138,26 @@
     <span id="camDot" class="status-dot"></span><span id="camLabel">CAM OFF</span>
     <span id="micDot" class="status-dot"></span><span id="micLabel">MIC OFF</span>
     <span id="recDot" class="status-dot"></span><span id="recLabel">STANDBY</span>
+    <span id="aiDot" class="status-dot"></span><span id="aiLabel">AI LOAD</span>
   </div>
 </header>
 
 <div class="main">
   <div class="viewfinder-wrap">
     <video id="videoEl" autoplay muted playsinline></video>
+    <canvas id="canvasOverlay"></canvas>
     <div class="no-cam" id="noCam">
       <div class="no-cam-icon">📷</div>
-      <div class="no-cam-text">APPUYEZ SUR DÉMARRER<br>POUR ACTIVER LA CAMÉRA</div>
+      <div class="no-cam-text">APPUYEZ SUR DÉMARRER</div>
     </div>
     <div class="hud">
       <div class="corner tl"></div><div class="corner tr"></div>
       <div class="corner bl"></div><div class="corner br"></div>
-      <div class="crosshair"></div>
+      <div id="detectionBox"><div id="detectionLabel"></div></div>
       <div class="rec-badge" id="recBadge">● REC</div>
       <div class="zoom-hud" id="zoomHud">1.0×</div>
       <div class="rec-timer" id="recTimer">00:00</div>
+      <div class="ai-badge" id="aiBadge">AI READY</div>
       <div class="scanlines"></div>
       <div class="cmd-flash" id="cmdFlash"></div>
     </div>
@@ -138,44 +170,82 @@
       <button class="zoom-btn" onclick="changeZoom(0.5)">+</button>
     </div>
     <button class="rec-btn" id="recBtn" onclick="toggleRecording()"></button>
-    <div style="display:flex;justify-content:flex-end;">
+    <div style="display:flex;justify-content:flex-end;gap:8px;align-items:center;">
+      <button class="auto-btn" id="autoZoomBtn" onclick="toggleAutoZoom()">AUTO ZOOM</button>
       <button class="mic-btn" id="micBtn">🎤</button>
     </div>
   </div>
 
-  <div class="voice-panel">
-    <div class="mic-btn" id="micIndicator" style="pointer-events:none;font-size:1rem;">🎤</div>
-    <div class="voice-info">
-      <div class="voice-label">COMMANDE VOCALE — APPUYER 🎤</div>
-      <div class="voice-text" id="voiceText">Appuyer 🎤 puis parler</div>
+  <div class="panel-row">
+    <div class="voice-panel">
+      <div class="mic-btn" id="micIndicator" style="pointer-events:none;font-size:1rem;">🎤</div>
+      <div class="voice-info">
+        <div class="voice-label">COMMANDE VOCALE</div>
+        <div class="voice-text" id="voiceText">Appuyer 🎤 puis parler</div>
+      </div>
+    </div>
+    <div class="detect-panel">
+      <div style="font-size:1.3rem;">🎯</div>
+      <div class="voice-info">
+        <div class="voice-label">DÉTECTION IA</div>
+        <div class="voice-text" id="detectText">Chargement modèle...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Quality panel -->
+  <div class="quality-panel">
+    <div style="font-size:0.6rem;letter-spacing:2px;color:var(--dim);margin-bottom:10px;">✨ AMÉLIORATION QUALITÉ</div>
+    <div class="quality-row">
+      <span class="quality-label">LUMINOSITÉ</span>
+      <input type="range" class="quality-slider" id="brightnessSlider" min="0.5" max="2" step="0.05" value="1.1" oninput="updateFilters()">
+      <span class="quality-val" id="brightnessVal">1.1</span>
+    </div>
+    <div class="quality-row">
+      <span class="quality-label">CONTRASTE</span>
+      <input type="range" class="quality-slider" id="contrastSlider" min="0.5" max="2.5" step="0.05" value="1.2" oninput="updateFilters()">
+      <span class="quality-val" id="contrastVal">1.2</span>
+    </div>
+    <div class="quality-row">
+      <span class="quality-label">SATURATION</span>
+      <input type="range" class="quality-slider" id="saturateSlider" min="0" max="3" step="0.05" value="1.3" oninput="updateFilters()">
+      <span class="quality-val" id="saturateVal">1.3</span>
+    </div>
+    <div class="quality-row">
+      <span class="quality-label">NETTETÉ</span>
+      <input type="range" class="quality-slider" id="sharpnessSlider" min="0" max="5" step="0.1" value="1" oninput="updateFilters()">
+      <span class="quality-val" id="sharpnessVal">1.0</span>
+    </div>
+    <div class="quality-row" style="margin-top:6px;">
+      <span class="quality-label">AUTO QUALITÉ</span>
+      <button class="auto-btn" id="autoQualityBtn" onclick="toggleAutoQuality()">OFF</button>
     </div>
   </div>
 
   <div class="section-label">COMMANDES VOCALES</div>
   <div class="cmds-grid">
     <div class="cmd-card"><div class="cmd-word">"ENREGISTRER"</div><div class="cmd-desc">Démarre la vidéo</div></div>
-    <div class="cmd-card"><div class="cmd-word">"STOP" / "ARRÊTER"</div><div class="cmd-desc">Arrête l'enregistrement</div></div>
+    <div class="cmd-card"><div class="cmd-word">"STOP"</div><div class="cmd-desc">Arrête l'enregistrement</div></div>
     <div class="cmd-card"><div class="cmd-word">"ZOOM PLUS"</div><div class="cmd-desc">Zoom avant</div></div>
     <div class="cmd-card"><div class="cmd-word">"ZOOM MOINS"</div><div class="cmd-desc">Zoom arrière</div></div>
-    <div class="cmd-card"><div class="cmd-word">"ZOOM DEUX" … "ZOOM CINQ"</div><div class="cmd-desc">Zoom direct ×2–×5</div></div>
-    <div class="cmd-card"><div class="cmd-word">"ZOOM MAX" / "ZOOM RESET"</div><div class="cmd-desc">Max ou normal</div></div>
-    <div class="cmd-card"><div class="cmd-word">"PHOTO"</div><div class="cmd-desc">Capture une photo</div></div>
+    <div class="cmd-card"><div class="cmd-word">"ZOOM AUTO"</div><div class="cmd-desc">Active/désactive zoom IA</div></div>
+    <div class="cmd-card"><div class="cmd-word">"ZOOM DEUX–CINQ"</div><div class="cmd-desc">Zoom direct</div></div>
+    <div class="cmd-card"><div class="cmd-word">"PHOTO"</div><div class="cmd-desc">Capture photo</div></div>
+    <div class="cmd-card"><div class="cmd-word">"QUALITÉ AUTO"</div><div class="cmd-desc">Amélioration auto</div></div>
   </div>
 </div>
 
 <script>
 // ── STATE ──────────────────────────────────────────────────
-let stream = null;
-let mediaRecorder = null;
-let recordedChunks = [];
-let isRecording = false;
-let zoomLevel = 1.0;
-const MIN_ZOOM = 1.0;
-const MAX_ZOOM = 5.0;
-let recInterval = null;
-let recSeconds = 0;
-let recognition = null;
-let isListening = false;
+let stream = null, mediaRecorder = null, recordedChunks = [];
+let isRecording = false, zoomLevel = 1.0;
+const MIN_ZOOM = 1.0, MAX_ZOOM = 8.0;
+let recInterval = null, recSeconds = 0;
+let recognition = null, isListening = false;
+let cocoModel = null, detectionRunning = false;
+let autoZoomEnabled = false, autoQualityEnabled = false;
+let targetZoom = 1.0, currentSmoothedZoom = 1.0;
+let smoothZoomInterval = null;
 
 // ── INIT ───────────────────────────────────────────────────
 document.getElementById('startBtn').addEventListener('click', initApp);
@@ -184,22 +254,71 @@ async function initApp() {
   document.getElementById('startScreen').style.display = 'none';
   try {
     stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode:'environment', width:{ideal:1280}, height:{ideal:720} },
+      video: { facingMode:'environment', width:{ideal:1920}, height:{ideal:1080} },
       audio: true
     });
-    document.getElementById('videoEl').srcObject = stream;
+    const video = document.getElementById('videoEl');
+    video.srcObject = stream;
     document.getElementById('noCam').style.display = 'none';
     setStatus('cam', true, 'CAM ON');
+    updateFilters();
   } catch(e) {
-    document.getElementById('noCam').querySelector('.no-cam-text').textContent = 'ACCÈS CAMÉRA REFUSÉ\n' + e.message;
+    document.getElementById('noCam').querySelector('.no-cam-text').textContent = 'ACCÈS REFUSÉ: ' + e.message;
   }
   initVoice();
+  loadAIModel();
+  startSmoothZoom();
 }
 
 // ── STATUS ─────────────────────────────────────────────────
 function setStatus(type, active, label, recording=false) {
   document.getElementById(type+'Dot').className = 'status-dot'+(recording?' recording':active?' active':'');
   document.getElementById(type+'Label').textContent = label;
+}
+
+// ── QUALITY FILTERS ────────────────────────────────────────
+function updateFilters() {
+  const b = document.getElementById('brightnessSlider').value;
+  const c = document.getElementById('contrastSlider').value;
+  const s = document.getElementById('saturateSlider').value;
+  const sh = document.getElementById('sharpnessSlider').value;
+  document.getElementById('brightnessVal').textContent = parseFloat(b).toFixed(1);
+  document.getElementById('contrastVal').textContent = parseFloat(c).toFixed(1);
+  document.getElementById('saturateVal').textContent = parseFloat(s).toFixed(1);
+  document.getElementById('sharpnessVal').textContent = parseFloat(sh).toFixed(1);
+
+  const sharpPx = parseFloat(sh) > 0 ? ` url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'><filter id='s'><feConvolveMatrix order='3' kernelMatrix='-${sh} -${sh} -${sh} -${sh} ${9*sh+1} -${sh} -${sh} -${sh} -${sh}'/></filter></svg>#s")` : '';
+  document.getElementById('videoEl').style.filter = `brightness(${b}) contrast(${c}) saturate(${s})`;
+}
+
+function toggleAutoQuality() {
+  autoQualityEnabled = !autoQualityEnabled;
+  const btn = document.getElementById('autoQualityBtn');
+  btn.textContent = autoQualityEnabled ? 'ON' : 'OFF';
+  btn.className = autoQualityEnabled ? 'auto-btn on' : 'auto-btn';
+  if (autoQualityEnabled) autoAdjustQuality();
+}
+
+function autoAdjustQuality() {
+  if (!autoQualityEnabled) return;
+  // Analyze video brightness and auto-adjust
+  const video = document.getElementById('videoEl');
+  const canvas = document.createElement('canvas');
+  canvas.width = 64; canvas.height = 36;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(video, 0, 0, 64, 36);
+  const data = ctx.getImageData(0, 0, 64, 36).data;
+  let total = 0;
+  for (let i = 0; i < data.length; i += 4) total += (data[i]+data[i+1]+data[i+2])/3;
+  const avg = total / (data.length/4);
+
+  // Auto adjust brightness based on scene
+  const targetBrightness = avg < 100 ? 1.4 : avg > 180 ? 0.9 : 1.1;
+  document.getElementById('brightnessSlider').value = targetBrightness;
+  document.getElementById('contrastSlider').value = avg < 80 ? 1.4 : 1.2;
+  document.getElementById('saturateSlider').value = 1.3;
+  updateFilters();
+  setTimeout(autoAdjustQuality, 2000);
 }
 
 // ── ZOOM ───────────────────────────────────────────────────
@@ -209,9 +328,119 @@ function setZoom(level) {
   document.getElementById('zoomHud').textContent = zoomLevel.toFixed(1)+'×';
   const pct = ((zoomLevel-MIN_ZOOM)/(MAX_ZOOM-MIN_ZOOM))*100;
   document.getElementById('zoomFill').style.width = Math.max(2,pct)+'%';
-  flashFeedback();
 }
 function changeZoom(delta) { setZoom(zoomLevel+delta); }
+
+function startSmoothZoom() {
+  smoothZoomInterval = setInterval(() => {
+    if (!autoZoomEnabled) return;
+    if (Math.abs(currentSmoothedZoom - targetZoom) > 0.05) {
+      currentSmoothedZoom += (targetZoom - currentSmoothedZoom) * 0.08;
+      setZoom(currentSmoothedZoom);
+    }
+  }, 50);
+}
+
+// ── AUTO ZOOM ──────────────────────────────────────────────
+function toggleAutoZoom() {
+  autoZoomEnabled = !autoZoomEnabled;
+  const btn = document.getElementById('autoZoomBtn');
+  btn.textContent = autoZoomEnabled ? 'AUTO ON' : 'AUTO ZOOM';
+  btn.className = autoZoomEnabled ? 'auto-btn on' : 'auto-btn';
+  if (!autoZoomEnabled) { targetZoom = 1.0; setZoom(1.0); }
+}
+
+// ── AI MODEL ───────────────────────────────────────────────
+async function loadAIModel() {
+  setStatus('ai', false, 'AI LOAD');
+  document.getElementById('detectText').textContent = 'Chargement IA...';
+  try {
+    cocoModel = await cocoSsd.load({ base: 'lite_mobilenet_v2' });
+    setStatus('ai', true, 'AI ON');
+    document.getElementById('aiBadge').textContent = 'AI READY';
+    document.getElementById('detectText').textContent = 'IA prête — montrez quelque chose !';
+    startDetection();
+  } catch(e) {
+    setStatus('ai', false, 'AI ERR');
+    document.getElementById('detectText').textContent = 'IA non disponible';
+  }
+}
+
+async function startDetection() {
+  if (!cocoModel) return;
+  detectionRunning = true;
+  detectLoop();
+}
+
+async function detectLoop() {
+  if (!detectionRunning || !cocoModel) return;
+  const video = document.getElementById('videoEl');
+  if (video.readyState >= 2) {
+    try {
+      const predictions = await cocoModel.detect(video);
+      handleDetections(predictions);
+    } catch(e) {}
+  }
+  setTimeout(detectLoop, 200); // ~5fps detection
+}
+
+function handleDetections(predictions) {
+  const box = document.getElementById('detectionBox');
+  const label = document.getElementById('detectionLabel');
+  const detectText = document.getElementById('detectText');
+  const video = document.getElementById('videoEl');
+  const wrap = document.querySelector('.viewfinder-wrap');
+
+  if (!predictions || predictions.length === 0) {
+    box.style.display = 'none';
+    detectText.textContent = 'Aucun objet détecté';
+    if (autoZoomEnabled) targetZoom = 1.0;
+    return;
+  }
+
+  // Pick highest confidence prediction
+  const best = predictions.reduce((a,b) => a.score > b.score ? a : b);
+  if (best.score < 0.4) { box.style.display = 'none'; return; }
+
+  const [x, y, w, h] = best.bbox;
+  const vW = video.videoWidth || 640;
+  const vH = video.videoHeight || 480;
+  const wrapW = wrap.clientWidth;
+  const wrapH = wrap.clientHeight;
+
+  // Scale to display
+  const scaleX = wrapW / vW;
+  const scaleY = wrapH / vH;
+
+  box.style.display = 'block';
+  box.style.left = (x * scaleX) + 'px';
+  box.style.top = (y * scaleY) + 'px';
+  box.style.width = (w * scaleX) + 'px';
+  box.style.height = (h * scaleY) + 'px';
+
+  const conf = Math.round(best.score * 100);
+  label.textContent = best.class.toUpperCase() + ' ' + conf + '%';
+
+  const names = {
+    person:'Personne', car:'Voiture', cat:'Chat', dog:'Chien',
+    bottle:'Bouteille', cell_phone:'Téléphone', laptop:'Ordinateur',
+    book:'Livre', cup:'Tasse', chair:'Chaise', tv:'Télévision',
+    keyboard:'Clavier', mouse:'Souris', backpack:'Sac', bicycle:'Vélo'
+  };
+  const fr = names[best.class] || best.class;
+  detectText.textContent = '🎯 ' + fr + ' (' + conf + '%)';
+
+  // Auto zoom based on object size
+  if (autoZoomEnabled) {
+    const objArea = (w * h) / (vW * vH);
+    // If object is small (<10% of frame) zoom in, if large (>40%) zoom out
+    if (objArea < 0.08) targetZoom = Math.min(MAX_ZOOM, currentSmoothedZoom + 0.3);
+    else if (objArea < 0.15) targetZoom = 3.0;
+    else if (objArea < 0.25) targetZoom = 2.0;
+    else if (objArea > 0.5) targetZoom = Math.max(MIN_ZOOM, currentSmoothedZoom - 0.2);
+    else targetZoom = 1.5;
+  }
+}
 
 // ── RECORDING ──────────────────────────────────────────────
 function toggleRecording() { isRecording ? stopRecording() : startRecording(); }
@@ -240,8 +469,8 @@ function startRecording() {
 }
 
 function stopRecording() {
-  if (!isRecording || !mediaRecorder) return;
-  mediaRecorder.stop(); isRecording = false; clearInterval(recInterval);
+  if (!isRecording||!mediaRecorder) return;
+  mediaRecorder.stop(); isRecording=false; clearInterval(recInterval);
   document.getElementById('recBadge').classList.remove('show');
   document.getElementById('recTimer').classList.remove('show');
   document.getElementById('recBtn').classList.remove('recording');
@@ -252,9 +481,7 @@ function stopRecording() {
 function saveVideo() {
   const blob = new Blob(recordedChunks, {type:'video/webm'});
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'voicecam_'+Date.now()+'.webm';
-  a.click();
+  a.href = URL.createObjectURL(blob); a.download='voicecam_'+Date.now()+'.webm'; a.click();
   showVoiceFeedback('✓ VIDÉO TÉLÉCHARGÉE', true);
 }
 
@@ -263,14 +490,18 @@ function takePhoto() {
   if (!stream) return;
   const video = document.getElementById('videoEl');
   const canvas = document.createElement('canvas');
-  canvas.width = video.videoWidth; canvas.height = video.videoHeight;
-  canvas.getContext('2d').drawImage(video,0,0);
+  canvas.width=video.videoWidth; canvas.height=video.videoHeight;
+  const ctx = canvas.getContext('2d');
+  // Apply quality filters to photo
+  const b = document.getElementById('brightnessSlider').value;
+  const c = document.getElementById('contrastSlider').value;
+  const s = document.getElementById('saturateSlider').value;
+  ctx.filter = `brightness(${b}) contrast(${c}) saturate(${s})`;
+  ctx.drawImage(video,0,0);
   canvas.toBlob(blob => {
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'voicecam_photo_'+Date.now()+'.jpg';
-    a.click();
-  }, 'image/jpeg', 0.95);
+    a.href=URL.createObjectURL(blob); a.download='voicecam_photo_'+Date.now()+'.jpg'; a.click();
+  }, 'image/jpeg', 0.97);
   showVoiceFeedback('📷 PHOTO PRISE', true);
   flashFeedback('rgba(255,255,255,0.3)');
 }
@@ -278,90 +509,78 @@ function takePhoto() {
 // ── VOICE ──────────────────────────────────────────────────
 function initVoice() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) { showVoiceFeedback('❌ Vocal non supporté sur ce navigateur'); return; }
-
+  if (!SR) { showVoiceFeedback('❌ Vocal non supporté'); return; }
   const micBtn = document.getElementById('micBtn');
-
   micBtn.addEventListener('touchstart', e => { e.preventDefault(); startListening(); }, {passive:false});
-  micBtn.addEventListener('click', () => { if (!isListening) startListening(); else stopListening(); });
+  micBtn.addEventListener('click', () => { if(!isListening) startListening(); else stopListening(); });
 }
 
 function startListening() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR || isListening) return;
-
+  if (!SR||isListening) return;
   recognition = new SR();
-  recognition.lang = 'fr-FR';
-  recognition.continuous = false;
-  recognition.interimResults = false;
-  recognition.maxAlternatives = 3;
-
+  recognition.lang='fr-FR'; recognition.continuous=false;
+  recognition.interimResults=false; recognition.maxAlternatives=3;
   recognition.onstart = () => {
-    isListening = true;
+    isListening=true;
     document.getElementById('micBtn').classList.add('listening');
     document.getElementById('micIndicator').classList.add('listening');
-    setStatus('mic', true, 'MIC ON');
+    setStatus('mic',true,'MIC ON');
     showVoiceFeedback('🔴 Parlez...');
   };
-
   recognition.onresult = event => {
-    const alts = [];
-    for (let i=0; i<event.results[0].length; i++)
-      alts.push(event.results[0][i].transcript.toLowerCase().trim());
+    const alts=[];
+    for(let i=0;i<event.results[0].length;i++) alts.push(event.results[0][i].transcript.toLowerCase().trim());
     showVoiceFeedback('"'+alts[0]+'"', true);
     processCommand(alts);
   };
-
   recognition.onerror = e => {
-    const msgs = {'not-allowed':'❌ Micro refusé','no-speech':'💬 Rien entendu','network':'❌ Erreur réseau'};
-    showVoiceFeedback(msgs[e.error] || '❌ '+e.error);
+    const msgs={'not-allowed':'❌ Micro refusé','no-speech':'💬 Rien entendu','network':'❌ Réseau'};
+    showVoiceFeedback(msgs[e.error]||'❌ '+e.error);
     stopListening();
   };
-
   recognition.onend = () => stopListening();
-
   try { recognition.start(); } catch(e) { showVoiceFeedback('❌ '+e.message); }
 }
 
 function stopListening() {
-  isListening = false;
+  isListening=false;
   document.getElementById('micBtn').classList.remove('listening');
   document.getElementById('micIndicator').classList.remove('listening');
-  setStatus('mic', false, 'MIC OFF');
+  setStatus('mic',false,'MIC OFF');
   try { if(recognition) recognition.stop(); } catch(e){}
 }
 
 // ── COMMANDS ───────────────────────────────────────────────
 function processCommand(alts) {
-  for (const t of alts) { if (matchCmd(t)) return; }
+  for(const t of alts) { if(matchCmd(t)) return; }
   showVoiceFeedback('❓ Non reconnu: "'+alts[0]+'"');
 }
 
 function matchCmd(t) {
-  if (/enregistr|démarre|record|start|film/.test(t)) { startRecording(); return true; }
-  if (/stop|arrêt|fin|termin/.test(t))               { stopRecording();  return true; }
-  if (/photo|capture|snap/.test(t))                  { takePhoto();      return true; }
-  const zm = t.match(/zoom\s*(un|1|deux|2|trois|3|quatre|4|cinq|5)/);
-  if (zm) { const map={un:1,'1':1,deux:2,'2':2,trois:3,'3':3,quatre:4,'4':4,cinq:5,'5':5}; setZoom(map[zm[1]]); showVoiceFeedback('ZOOM → ×'+map[zm[1]],true); return true; }
-  if (/zoom.*(max|maximum)/.test(t))                          { setZoom(MAX_ZOOM); showVoiceFeedback('ZOOM MAX ×'+MAX_ZOOM,true); return true; }
-  if (/zoom.*(reset|normal|zéro|mini)/.test(t))               { setZoom(1); showVoiceFeedback('ZOOM RESET ×1',true); return true; }
-  if (/zoom.*(plus|avant|agrand|gross)|zoomer/.test(t))       { changeZoom(0.5); showVoiceFeedback('ZOOM + → ×'+zoomLevel.toFixed(1),true); return true; }
-  if (/zoom.*(moins|arrière|rédui|petit)|dézoom/.test(t))     { changeZoom(-0.5); showVoiceFeedback('ZOOM − → ×'+zoomLevel.toFixed(1),true); return true; }
+  if(/enregistr|démarre|record|start|film/.test(t)){startRecording();return true;}
+  if(/stop|arrêt|fin|termin/.test(t)){stopRecording();return true;}
+  if(/photo|capture|snap/.test(t)){takePhoto();return true;}
+  if(/zoom.*(auto|ia|detect|intelli)/.test(t)||/auto.*zoom/.test(t)){toggleAutoZoom();return true;}
+  if(/qualité.*(auto|ia)|auto.*qualité/.test(t)){toggleAutoQuality();return true;}
+  const zm=t.match(/zoom\s*(un|1|deux|2|trois|3|quatre|4|cinq|5|six|6|sept|7|huit|8)/);
+  if(zm){const map={un:1,'1':1,deux:2,'2':2,trois:3,'3':3,quatre:4,'4':4,cinq:5,'5':5,six:6,'6':6,sept:7,'7':7,huit:8,'8':8};setZoom(map[zm[1]]);showVoiceFeedback('ZOOM → ×'+map[zm[1]],true);return true;}
+  if(/zoom.*(max|maximum)/.test(t)){setZoom(MAX_ZOOM);showVoiceFeedback('ZOOM MAX ×'+MAX_ZOOM,true);return true;}
+  if(/zoom.*(reset|normal|zéro|mini)/.test(t)){setZoom(1);showVoiceFeedback('ZOOM RESET ×1',true);return true;}
+  if(/zoom.*(plus|avant|agrand|gross)|zoomer/.test(t)){changeZoom(0.5);showVoiceFeedback('ZOOM + → ×'+zoomLevel.toFixed(1),true);return true;}
+  if(/zoom.*(moins|arrière|rédui|petit)|dézoom/.test(t)){changeZoom(-0.5);showVoiceFeedback('ZOOM − → ×'+zoomLevel.toFixed(1),true);return true;}
   return false;
 }
 
 // ── FEEDBACK ───────────────────────────────────────────────
 function showVoiceFeedback(text, isCmd=false) {
-  const el = document.getElementById('voiceText');
-  el.textContent = text;
-  el.className = 'voice-text'+(isCmd?' cmd':'');
+  const el=document.getElementById('voiceText');
+  el.textContent=text; el.className='voice-text'+(isCmd?' cmd':'');
 }
-
 function flashFeedback(color='rgba(0,255,136,0.15)') {
-  const el = document.getElementById('cmdFlash');
-  el.style.background = color;
-  el.classList.add('show');
-  setTimeout(()=>el.classList.remove('show'), 150);
+  const el=document.getElementById('cmdFlash');
+  el.style.background=color; el.classList.add('show');
+  setTimeout(()=>el.classList.remove('show'),150);
 }
 </script>
 </body>
