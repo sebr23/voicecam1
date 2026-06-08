@@ -293,6 +293,7 @@ select.setting-sel{background:var(--panel2);border:1px solid var(--border);color
         <button class="auto-btn" id="autoZoomBtnFs" onclick="toggleAutoZoom()">AUTO ZOOM</button>
         <button class="ic-btn" id="micBtnFs">🎤</button>
         <button class="ic-btn" id="gridBtnFs" onclick="toggleGrid()" title="Grille">⊞</button>
+        <button class="ic-btn" id="flashBtnFs" onclick="toggleFlash()" title="Flash">⚡</button>
       </div>
     </div>
   </div>
@@ -311,6 +312,7 @@ select.setting-sel{background:var(--panel2);border:1px solid var(--border);color
       <button class="auto-btn" id="autoZoomBtn" onclick="toggleAutoZoom()">AUTO</button>
       <button class="ic-btn" id="micBtn" title="Commande vocale">🎤</button>
       <button class="ic-btn" id="gridBtn" onclick="toggleGrid()" title="Grille">⊞</button>
+      <button class="ic-btn" id="flashBtn" onclick="toggleFlash()" title="Flash / Torche">⚡</button>
       <button class="ic-btn" id="tpBtn" onclick="toggleTeleprompter()" title="Téléprompteur">📝</button>
       <button class="ic-btn" id="fsBtn" onclick="toggleFullscreen()" title="Plein écran">⛶</button>
     </div>
@@ -422,6 +424,7 @@ select.setting-sel{background:var(--panel2);border:1px solid var(--border);color
       <div class="cmd-card"><div class="cmd-word">"GRILLE"</div><div class="cmd-desc">Affiche la grille tiers</div></div>
       <div class="cmd-card"><div class="cmd-word">"QUALITÉ AUTO"</div><div class="cmd-desc">Amélioration auto image</div></div>
       <div class="cmd-card"><div class="cmd-word">"PLEIN ÉCRAN"</div><div class="cmd-desc">Mode plein écran</div></div>
+      <div class="cmd-card"><div class="cmd-word">"FLASH" / "TORCHE"</div><div class="cmd-desc">Active torche ou flash écran</div></div>
       <div class="cmd-card"><div class="cmd-word">"PROMPTEUR"</div><div class="cmd-desc">Affiche téléprompteur</div></div>
     </div>
   </div>
@@ -933,7 +936,7 @@ function matchCmd(t) {
   if(/photo|capture|snap/.test(t)){takePhoto();return true;}
   if(/zoom.*(auto|ia)|auto.*zoom/.test(t)){toggleAutoZoom();return true;}
   if(/qualité.*(auto|ia)|auto.*qualité/.test(t)){toggleAutoQuality();return true;}
-  if(/grille|grid|tiers/.test(t)){toggleGrid();return true;}
+  if(/flash|torche|lumière/.test(t)){toggleFlash();return true;}
   if(/plein.*(écran|ecran)|fullscreen/.test(t)){toggleFullscreen();return true;}
   if(/prompt|téléprompt|telepromp/.test(t)){toggleTeleprompter();return true;}
   const zm=t.match(/zoom\s*(un|1|deux|2|trois|3|quatre|4|cinq|5|six|6|sept|7|huit|8)/);
@@ -943,6 +946,54 @@ function matchCmd(t) {
   if(/zoom.*(plus|avant|agrand|gross)|zoomer/.test(t)){changeZoom(0.5);showVoiceFeedback('ZOOM + → ×'+zoomLevel.toFixed(1),true);return true;}
   if(/zoom.*(moins|arrière|rédui|petit)|dézoom/.test(t)){changeZoom(-0.5);showVoiceFeedback('ZOOM − → ×'+zoomLevel.toFixed(1),true);return true;}
   return false;
+}
+
+// ── FLASH / TORCH ──────────────────────────────────────────
+let flashOn = false;
+let flashOverlay = null;
+
+async function toggleFlash() {
+  // 1. Essai torche hardware (Android Chrome)
+  if (stream) {
+    const track = stream.getVideoTracks()[0];
+    if (track) {
+      const caps = track.getCapabilities();
+      if (caps && caps.torch) {
+        flashOn = !flashOn;
+        try {
+          await track.applyConstraints({ advanced: [{ torch: flashOn }] });
+          updateFlashBtn();
+          showVoiceFeedback(flashOn ? '⚡ TORCHE ON' : '⚡ TORCHE OFF', true);
+          return;
+        } catch(e) {}
+      }
+    }
+  }
+  // 2. Fallback — flash écran blanc
+  screenFlash();
+}
+
+function screenFlash() {
+  // Crée un overlay blanc qui clignote comme un flash photo
+  if (!flashOverlay) {
+    flashOverlay = document.createElement('div');
+    flashOverlay.style.cssText = 'position:fixed;inset:0;background:#fff;z-index:9999;pointer-events:none;opacity:0;transition:opacity 0.05s;';
+    document.body.appendChild(flashOverlay);
+  }
+  flashOverlay.style.opacity = '1';
+  setTimeout(() => { flashOverlay.style.opacity = '0'; }, 80);
+  showVoiceFeedback('⚡ FLASH !', true);
+}
+
+function updateFlashBtn() {
+  ['flashBtn','flashBtnFs'].forEach(id => {
+    const btn = document.getElementById(id);
+    if (btn) {
+      btn.className = flashOn ? 'ic-btn active' : 'ic-btn';
+      btn.style.color = flashOn ? 'var(--orange)' : '';
+      btn.style.borderColor = flashOn ? 'var(--orange)' : '';
+    }
+  });
 }
 
 // ── FULLSCREEN ─────────────────────────────────────────────
