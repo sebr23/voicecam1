@@ -173,6 +173,7 @@
     <div style="display:flex;justify-content:flex-end;gap:8px;align-items:center;">
       <button class="auto-btn" id="autoZoomBtn" onclick="toggleAutoZoom()">AUTO ZOOM</button>
       <button class="mic-btn" id="micBtn">🎤</button>
+      <button class="mic-btn" id="fsBtn" onclick="toggleFullscreen()" title="Plein écran">⛶</button>
     </div>
   </div>
 
@@ -572,7 +573,31 @@ function matchCmd(t) {
   return false;
 }
 
-// ── FEEDBACK ───────────────────────────────────────────────
+// ── FULLSCREEN ─────────────────────────────────────────────
+function toggleFullscreen() {
+  const wrap = document.querySelector('.viewfinder-wrap');
+  const btn = document.getElementById('fsBtn');
+  if (!document.fullscreenElement) {
+    wrap.requestFullscreen().then(() => {
+      btn.textContent = '✕';
+      btn.title = 'Quitter plein écran';
+    }).catch(e => {
+      // fallback: fullscreen whole page
+      document.documentElement.requestFullscreen();
+    });
+  } else {
+    document.exitFullscreen();
+    btn.textContent = '⛶';
+    btn.title = 'Plein écran';
+  }
+}
+document.addEventListener('fullscreenchange', () => {
+  if (!document.fullscreenElement) {
+    document.getElementById('fsBtn').textContent = '⛶';
+  }
+});
+
+
 function showVoiceFeedback(text, isCmd=false) {
   const el=document.getElementById('voiceText');
   el.textContent=text; el.className='voice-text'+(isCmd?' cmd':'');
